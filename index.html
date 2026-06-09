@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#121215">
+<title>每日时间 · 早睡早起版</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: #121215;
+    color: #e8e4dc;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding-top: 8px;
+  }
+
+  /* Time header */
+  .time-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .current-time {
+    font-size: 13px;
+    color: #6b6860;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+  }
+  .current-day {
+    font-size: 12px;
+    color: #4a4740;
+  }
+
+  /* Progress bar */
+  .progress-track {
+    width: 100%;
+    height: 2px;
+    background: #25252a;
+    border-radius: 1px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: #e8a840;
+    border-radius: 1px;
+    transition: width 0.6s linear;
+    width: 0%;
+  }
+
+  /* Current block */
+  .now-section { text-align: center; }
+  .now-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #5a5648;
+    margin-bottom: 4px;
+  }
+  .now-activity {
+    font-size: 56px;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.04em;
+    color: #e8e4dc;
+    margin-bottom: 8px;
+  }
+  .now-time-range {
+    font-size: 14px;
+    color: #6b6860;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+  }
+  .now-remaining {
+    font-size: 15px;
+    color: #e8a840;
+    font-weight: 500;
+  }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: #222228;
+    margin: 4px 0;
+  }
+
+  /* Upcoming */
+  .upcoming-section { display: flex; flex-direction: column; gap: 16px; }
+  .upcoming-header {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: #4a4740;
+    text-transform: uppercase;
+  }
+  .upcoming-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 14px 16px;
+    background: #18181d;
+    border-radius: 8px;
+  }
+  .upcoming-left { display: flex; flex-direction: column; gap: 2px; }
+  .upcoming-act {
+    font-size: 18px;
+    font-weight: 600;
+    color: #d8d4cc;
+  }
+  .upcoming-dur {
+    font-size: 13px;
+    color: #5a5648;
+  }
+  .upcoming-right {
+    text-align: right;
+    font-size: 14px;
+    color: #6b6860;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Recommendation placeholder (hidden until data available) */
+  .rec-section { display: none; flex-direction: column; gap: 12px; }
+  .rec-section.visible { display: flex; }
+  .rec-header {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: #4a4740;
+    text-transform: uppercase;
+  }
+  .rec-item {
+    padding: 12px 16px;
+    background: #18181d;
+    border-radius: 8px;
+    border-left: 2px solid #e8a840;
+    font-size: 14px;
+    color: #c8c4bc;
+  }
+  .rec-tag {
+    display: inline-block;
+    font-size: 11px;
+    color: #8a7a50;
+    background: rgba(232,168,64,0.08);
+    padding: 1px 8px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    font-size: 11px;
+    color: #2a2824;
+    letter-spacing: 0.1em;
+    padding-top: 8px;
+  }
+
+  /* Fade in */
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .container > * { animation: fadeIn 0.5s ease-out both; }
+  .container > *:nth-child(1) { animation-delay: 0s; }
+  .container > *:nth-child(2) { animation-delay: 0.05s; }
+  .container > *:nth-child(3) { animation-delay: 0.1s; }
+  .container > *:nth-child(4) { animation-delay: 0.15s; }
+  .container > *:nth-child(5) { animation-delay: 0.2s; }
+  .container > *:nth-child(6) { animation-delay: 0.25s; }
+
+  /* Transition hint: flash accent when block changes */
+  @keyframes pulseAccent {
+    0%,100% { color: #e8a840; }
+    50% { color: #f0c050; }
+  }
+  .now-activity.just-started { animation: pulseAccent 2s ease-in-out; }
+</style>
+</head>
+<body>
+<div class="container" id="app">
+  <div class="time-header">
+    <div class="current-time" id="timeDisplay">--:--</div>
+    <div class="current-day" id="dayDisplay">---</div>
+  </div>
+
+  <div class="progress-track">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+
+  <div class="now-section">
+    <div class="now-label">现在</div>
+    <div class="now-activity" id="nowActivity">---</div>
+    <div class="now-time-range" id="nowTimeRange">--:-- — --:--</div>
+    <div class="now-remaining" id="nowRemaining">---</div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="upcoming-section" id="upcomingSection">
+    <div class="upcoming-header">接下来 ▸</div>
+  </div>
+
+  <div class="rec-section" id="recSection">
+    <div class="rec-header">推荐 ▸</div>
+  </div>
+
+  <div class="footer">早睡早起版</div>
+</div>
+
+<script>
+// ── Schedule data (早睡早起版) ──────────────────────────────
+// Each block: { act, label?, s:[h,m], e:[h,m] }
+// s = start, e = end (start of next block)
+// Duration = e - s (with +1440 if overnight)
+const WEEKDAY = [
+  { act:'起床',  s:[7,30], e:[7,45] },
+  { act:'进步',  s:[7,45], e:[8,30] },
+  { act:'亲子',  s:[8,30], e:[8,45] },
+  { act:'路上',  s:[8,45], e:[10,0] },
+  { act:'吃饭',  s:[10,0], e:[10,15] },
+  { act:'上班',  s:[10,15],e:[12,0] },
+  { act:'进步',  s:[12,0], e:[13,15] },
+  { act:'刷手机',s:[13,15],e:[13,30] },
+  { act:'睡觉',  s:[13,30],e:[14,0], label:'午休' },
+  { act:'上班',  s:[14,0], e:[17,45] },
+  { act:'吃饭',  s:[17,45],e:[18,15] },
+  { act:'进步',  s:[18,15],e:[20,30] },
+  { act:'路上',  s:[20,30],e:[21,45] },
+  { act:'亲子',  s:[21,45],e:[23,0] },
+  { act:'夫妻',  s:[23,0], e:[0,15] },
+  { act:'刷手机',s:[0,15], e:[0,30] },
+  { act:'睡觉',  s:[0,30], e:[7,30] },
+];
+
+const WEEKEND = [
+  { act:'起床',  s:[7,30], e:[7,45] },
+  { act:'进步',  s:[7,45], e:[9,0] },
+  { act:'亲子',  s:[9,0],  e:[14,0] },
+  { act:'睡觉',  s:[14,0], e:[16,0], label:'午休' },
+  { act:'亲子',  s:[16,0], e:[23,0] },
+  { act:'夫妻',  s:[23,0], e:[0,15] },
+  { act:'刷手机',s:[0,15], e:[0,30] },
+  { act:'睡觉',  s:[0,30], e:[7,30] },
+];
+
+const DAYS = ['周日','周一','周二','周三','周四','周五','周六'];
+
+// ── Recommendation system (reserved for future) ─────────────
+const ACTIVITY_TAGS = {
+  '路上':   ['被动学习','知识复习','资料收集','轻度阅读'],
+  '进步':   ['深度学习','编程实践','写作','学习','复习'],
+  '刷手机': ['资讯浏览','社交','轻度阅读'],
+  '吃饭':   ['资讯浏览','社交'],
+  '亲子':   [],
+  '夫妻':   [],
+  '上班':   [],
+  '起床':   [],
+  '睡觉':   [],
+};
+let RECOMMENDATIONS = []; // Populated by schedule-data.js if exists
+function getRecommendations(activityName, count) {
+  count = count || 3;
+  var tags = ACTIVITY_TAGS[activityName] || [];
+  if (!tags.length || !RECOMMENDATIONS.length) return [];
+  return RECOMMENDATIONS
+    .filter(function(r) { return r.tags.some(function(t) { return tags.indexOf(t) >= 0; }); })
+    .sort(function(a, b) { return (a.priority || 9) - (b.priority || 9); })
+    .slice(0, count);
+}
+function renderRecommendations(activityName) {
+  var recs = getRecommendations(activityName);
+  var section = document.getElementById('recSection');
+  if (!recs.length) { section.classList.remove('visible'); return; }
+  section.classList.add('visible');
+  var html = '<div class="rec-header">推荐 ▸</div>';
+  recs.forEach(function(r) {
+    var tag = r.tags && r.tags[0] ? '<span class="rec-tag">'+r.tags[0]+'</span>' : '';
+    html += '<div class="rec-item">'+r.title+tag+'</div>';
+  });
+  section.innerHTML = html;
+}
+
+// ── Helpers ─────────────────────────────────────────────────
+function toMin(t) { return t[0]*60 + t[1]; }
+function isOvernight(s, e) { return toMin(s) > toMin(e); }
+function blockDuration(b) {
+  var sm = toMin(b.s), em = toMin(b.e);
+  if (em <= sm) em += 1440;
+  return em - sm;
+}
+function findBlock(schedule, nowMin) {
+  for (var i = 0; i < schedule.length; i++) {
+    var sm = toMin(schedule[i].s), em = toMin(schedule[i].e);
+    if (sm > em) { if (nowMin >= sm || nowMin < em) return i; }
+    else { if (nowMin >= sm && nowMin < em) return i; }
+  }
+  return -1;
+}
+function minsUntilBlock(b, nowMin) {
+  var sm = toMin(b.s), diff = sm - nowMin;
+  return diff < 0 ? diff + 1440 : diff;
+}
+function progressPercent(b, nowMin) {
+  var sm = toMin(b.s), em = toMin(b.e);
+  if (em <= sm) em += 1440;
+  var total = em - sm, elapsed = nowMin - sm;
+  if (elapsed < 0) elapsed += 1440;
+  return Math.min(100, Math.max(0, Math.round(elapsed / total * 100)));
+}
+function fmtTime(t) {
+  var h = t[0], m = t[1];
+  return (h<10?'0':'')+h+':'+(m<10?'0':'')+m;
+}
+function fmtDuration(min) {
+  if (min >= 60) {
+    var h = Math.floor(min/60), m = min%60;
+    return m ? h+' 小时 '+m+' 分钟' : h+' 小时';
+  }
+  return min + ' 分钟';
+}
+function fmtRemaining(min) {
+  if (min <= 0) return '即将切换';
+  if (min < 60) return '还剩 ' + min + ' 分钟';
+  var h = Math.floor(min/60), m = min%60;
+  return m ? '还剩 '+h+' 小时 '+m+' 分钟' : '还剩 '+h+' 小时';
+}
+function fmtUntil(min) {
+  if (min <= 0) return '即将开始';
+  if (min < 60) return min + ' 分钟后';
+  var h = Math.floor(min/60), m = min%60;
+  return m ? h+' 小时 '+m+' 分钟后' : h+' 小时后';
+}
+
+// ── Main update ─────────────────────────────────────────────
+var _prevBlockIdx = -1;
+
+function update() {
+  var now = new Date();
+  var day = now.getDay();
+  var nowMin = now.getHours()*60 + now.getMinutes();
+  var isWeekend = day === 0 || day === 6;
+  var schedule = isWeekend ? WEEKEND : WEEKDAY;
+
+  var idx = findBlock(schedule, nowMin);
+  if (idx < 0) return;
+  var block = schedule[idx];
+  var remaining = minsUntilBlock(schedule[(idx+1) % schedule.length], nowMin);
+  var pct = progressPercent(block, nowMin);
+
+  // Time header
+  document.getElementById('timeDisplay').textContent =
+    (now.getHours()<10?'0':'')+now.getHours()+':'+(now.getMinutes()<10?'0':'')+now.getMinutes();
+  document.getElementById('dayDisplay').textContent = DAYS[day] + (isWeekend ? ' · 周末' : '');
+
+  // Progress bar
+  document.getElementById('progressFill').style.width = pct + '%';
+
+  // Now section
+  var actName = block.label || block.act;
+  var el = document.getElementById('nowActivity');
+  if (idx !== _prevBlockIdx && _prevBlockIdx >= 0) {
+    el.classList.remove('just-started');
+    void el.offsetWidth;
+    el.classList.add('just-started');
+  }
+  el.textContent = actName;
+  document.getElementById('nowTimeRange').textContent =
+    fmtTime(block.s) + ' — ' + fmtTime(block.e);
+  document.getElementById('nowRemaining').textContent = fmtRemaining(remaining);
+  _prevBlockIdx = idx;
+
+  // Upcoming (next 3 blocks)
+  var upcomingHTML = '<div class="upcoming-header">接下来 ▸</div>';
+  for (var i = 1; i <= 3; i++) {
+    var nb = schedule[(idx + i) % schedule.length];
+    var until = minsUntilBlock(nb, nowMin);
+    var dur = blockDuration(nb);
+    var nbName = nb.label || nb.act;
+    upcomingHTML +=
+      '<div class="upcoming-item">' +
+        '<div class="upcoming-left">' +
+          '<span class="upcoming-act">' + nbName + '</span>' +
+          '<span class="upcoming-dur">约 ' + fmtDuration(dur) + '</span>' +
+        '</div>' +
+        '<span class="upcoming-right">' + fmtUntil(until) + '</span>' +
+      '</div>';
+  }
+  document.getElementById('upcomingSection').innerHTML = upcomingHTML;
+
+  // Recommendations (silently no-op when empty)
+  renderRecommendations(block.act);
+}
+
+// ── Initial render + tick ─────────────────────────────────────
+update();
+setInterval(update, 1000);
+
+// ── Load external recommendation data (async, best-effort) ────
+(function() {
+  var s = document.createElement('script');
+  s.src = 'schedule-data.js';
+  s.onload = function() { update(); };
+  // onerror: silently ignore, recommendations stay hidden
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>

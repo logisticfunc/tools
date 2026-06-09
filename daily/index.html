@@ -42,6 +42,11 @@
     letter-spacing: 0.08em;
     font-variant-numeric: tabular-nums;
   }
+  .current-time .seconds {
+    font-size: 10px;
+    color: #3a3730;
+    margin-left: 1px;
+  }
   .current-day {
     font-size: 12px;
     color: #4a4740;
@@ -332,8 +337,10 @@ function fmtDuration(min) {
   }
   return min + ' 分钟';
 }
-function fmtRemaining(min) {
-  if (min <= 0) return '即将切换';
+function fmtRemaining(min, sec) {
+  if (min < 0 || (min === 0 && sec <= 0)) return '即将切换';
+  if (min === 0) return '还剩 ' + sec + ' 秒';
+  if (min < 5) return '还剩 ' + min + ' 分 ' + (sec<10?'0':'') + sec + ' 秒';
   if (min < 60) return '还剩 ' + min + ' 分钟';
   var h = Math.floor(min/60), m = min%60;
   return m ? '还剩 '+h+' 小时 '+m+' 分钟' : '还剩 '+h+' 小时';
@@ -358,12 +365,16 @@ function update() {
   var idx = findBlock(schedule, nowMin);
   if (idx < 0) return;
   var block = schedule[idx];
-  var remaining = minsUntilBlock(schedule[(idx+1) % schedule.length], nowMin);
+  var nextBlock = schedule[(idx+1) % schedule.length];
+  var remainingMin = minsUntilBlock(nextBlock, nowMin);
+  var remainingSec = 59 - now.getSeconds();
   var pct = progressPercent(block, nowMin);
 
   // Time header
-  document.getElementById('timeDisplay').textContent =
-    (now.getHours()<10?'0':'')+now.getHours()+':'+(now.getMinutes()<10?'0':'')+now.getMinutes();
+  var hh = (now.getHours()<10?'0':'')+now.getHours();
+  var mm = (now.getMinutes()<10?'0':'')+now.getMinutes();
+  var ss = (now.getSeconds()<10?'0':'')+now.getSeconds();
+  document.getElementById('timeDisplay').innerHTML = hh+':'+mm+'<span class="seconds">'+ss+'</span>';
   document.getElementById('dayDisplay').textContent = DAYS[day] + (isWeekend ? ' · 周末' : '');
 
   // Progress bar
@@ -380,7 +391,7 @@ function update() {
   el.textContent = actName;
   document.getElementById('nowTimeRange').textContent =
     fmtTime(block.s) + ' — ' + fmtTime(block.e);
-  document.getElementById('nowRemaining').textContent = fmtRemaining(remaining);
+  document.getElementById('nowRemaining').textContent = fmtRemaining(remainingMin, remainingSec);
   _prevBlockIdx = idx;
 
   // Upcoming (next 3 blocks)

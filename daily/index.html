@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="daily-routine-version" content="2026-06-13-gist-sync">
+<meta name="daily-routine-version" content="2026-06-13-selected-run">
 <title>每日时间 · v6</title>
 <style>
   :root{
@@ -54,7 +54,6 @@
   }
   .seg.future{opacity:.32}
   .seg.deviated{box-shadow:inset 0 0 0 2px rgba(216,91,91,.55)}
-  .seg.selected{outline:2px solid var(--accent);outline-offset:-3px;z-index:8}
   .seg.onplan::after{content:"";position:absolute;left:5px;bottom:5px;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.62)}
   .seg.tiny span{display:none}
   .nowline{
@@ -163,7 +162,7 @@
       <section class="section">
         <div class="focusgrid">
           <div class="nowcard">
-            <div class="label">Now</div>
+            <div class="label" id="focusLabel">Now</div>
             <div class="nowtitle" id="nowTitle">--</div>
             <div class="meta" id="nowMeta">--</div>
             <div class="meter"><span id="nowMeter"></span></div>
@@ -439,25 +438,49 @@ function currentSchedule(){
 function currentMinute(){const d=new Date();return d.getHours()*60+d.getMinutes()}
 function segmentAt(segs,min){return segs.find(s=>min>=s.s&&min<s.e)||segs[segs.length-1]}
 function colorFor(a){return 'var('+COLOR[a]+')'}
-function renderSeg(seg,now,kind){
+function actualName(seg){return seg.actual||seg.a}
+function actualRunFor(segs,target){
+  const act=actualName(target);
+  let start=target.s,end=target.e;
+  const sorted=segs.slice().sort((a,b)=>a.s-b.s);
+  let changed=true;
+  while(changed){
+    changed=false;
+    for(const s of sorted){
+      if(actualName(s)!==act)continue;
+      if(s.e===start){start=s.s;changed=true}
+      if(s.s===end){end=s.e;changed=true}
+    }
+  }
+  const pieces=sorted.filter(s=>s.s>=start&&s.e<=end&&actualName(s)===act);
+  return {
+    ...target,
+    s:start,
+    e:end,
+    actual:act,
+    planned:pieces.map(s=>s.planned||s.a).filter((v,i,a)=>v&&a.indexOf(v)===i).join(' / '),
+    note:pieces.map(s=>s.note).filter(Boolean).join(' / '),
+    deviated:pieces.some(s=>s.deviated)
+  };
+}
+function renderSeg(seg,now,kind,allSegs){
   const left=seg.s/1440*100,width=(seg.e-seg.s)/1440*100;
   const div=document.createElement('button');
-  const isSelected=selected&&selected.s===seg.s&&selected.e===seg.e&&(selected.actual||selected.a)===(seg.actual||seg.a);
-  div.className='seg '+(width<3.8?'tiny ':'')+(kind==='actual'?(seg.deviated?'deviated ':'onplan '):'')+(seg.s>=now?'future ':'')+(isSelected?'selected ':'');
-  div.style.left=left+'%';div.style.width=width+'%';div.style.background=colorFor(seg.actual||seg.a);
+  div.className='seg '+(width<3.8?'tiny ':'')+(kind==='actual'?(seg.deviated?'deviated ':'onplan '):'')+(seg.s>=now?'future ':'');
+  div.style.left=left+'%';div.style.width=width+'%';div.style.background=colorFor(actualName(seg));
   div.style.border=0;div.style.cursor=kind==='actual'?'pointer':'default';
-  div.innerHTML='<span>'+esc(SHORT[seg.actual||seg.a]||seg.actual||seg.a)+'</span>';
-  div.title=(seg.actual||seg.a)+' '+fmt(seg.s)+'-'+fmt(seg.e);
+  div.innerHTML='<span>'+esc(SHORT[actualName(seg)]||actualName(seg))+'</span>';
+  div.title=actualName(seg)+' '+fmt(seg.s)+'-'+fmt(seg.e);
   if(kind==='actual'){
-    div.addEventListener('click',()=>{selected=seg;renderSelected(seg);update()});
+    div.addEventListener('click',()=>{selected=actualRunFor(allSegs,seg);renderSelected(selected);update()});
   }
   return div;
 }
 function renderTracks(plan,actual,now){
   const planEl=document.getElementById('planTrack'),actEl=document.getElementById('actualTrack');
   planEl.innerHTML='';actEl.innerHTML='';
-  for(const s of plan)planEl.appendChild(renderSeg(s,now,'plan'));
-  for(const s of actual)actEl.appendChild(renderSeg(s,now,'actual'));
+  for(const s of plan)planEl.appendChild(renderSeg(s,now,'plan',plan));
+  for(const s of actual)actEl.appendChild(renderSeg(s,now,'actual',actual));
   const line=document.createElement('div');line.className='nowline';line.style.left=(now/1440*100)+'%';actEl.appendChild(line);
 }
 function renderRuler(){
@@ -472,11 +495,20 @@ function renderLegend(){
     const s=document.createElement('span');s.innerHTML='<b style="background:'+colorFor(a)+'"></b>'+a;l.appendChild(s);
   });
 }
-function renderNow(actual,now){
-  const seg=segmentAt(actual,now);if(!seg)return;
-  const act=seg.actual||seg.a,total=seg.e-seg.s,done=Math.max(0,now-seg.s);
+function currentFocusSegment(actual,now){
+  if(!selected)return segmentAt(actual,now);
+  const seg=actual.find(s=>selected.s>=s.s&&selected.s<s.e&&actualName(s)===actualName(selected));
+  return seg?actualRunFor(actual,seg):selected;
+}
+function renderFocus(actual,now){
+  const seg=currentFocusSegment(actual,now);if(!seg)return;
+  const isSelected=!!selected,act=actualName(seg),total=seg.e-seg.s;
+  const done=isSelected?total:Math.max(0,now-seg.s);
+  document.getElementById('focusLabel').textContent=isSelected?'Selected':'Now';
   document.getElementById('nowTitle').textContent=act;
-  document.getElementById('nowMeta').textContent=fmt(seg.s)+'-'+fmt(seg.e)+' · 已过 '+durText(done)+' · 剩余 '+durText(seg.e-now)+(seg.deviated?' · 原计划 '+seg.planned:'');
+  document.getElementById('nowMeta').textContent=isSelected
+    ? fmt(seg.s)+'-'+fmt(seg.e)+' · '+durText(total)+(seg.deviated?' · 原计划 '+seg.planned:' · 按计划')
+    : fmt(seg.s)+'-'+fmt(seg.e)+' · 已过 '+durText(done)+' · 剩余 '+durText(seg.e-now)+(seg.deviated?' · 原计划 '+seg.planned:'');
   document.getElementById('nowMeter').style.width=Math.min(100,done/total*100)+'%';
 }
 function renderSummary(plan,actual,now){
@@ -516,7 +548,7 @@ function renderLog(){
 }
 function renderSelected(seg){
   const detail=document.getElementById('selectedDetail');
-  detail.innerHTML='<p><b>'+esc(seg.actual||seg.a)+'</b> · '+fmt(seg.s)+'-'+fmt(seg.e)+' · '+durText(seg.e-seg.s)+'</p>'+
+  detail.innerHTML='<p><b>'+esc(actualName(seg))+'</b> · '+fmt(seg.s)+'-'+fmt(seg.e)+' · '+durText(seg.e-seg.s)+'</p>'+
     (seg.deviated?'<p>原计划：<b>'+esc(seg.planned)+'</b>'+(seg.note?' · '+esc(seg.note):'')+'</p>':'<p>按计划执行。</p>');
   document.getElementById('fromTime').value=fmt(seg.s);
   document.getElementById('toTime').value=fmt(seg.e);
@@ -527,14 +559,14 @@ function update(){
   document.getElementById('dateText').textContent=keyOf(nowDate)+' '+DAYS[nowDate.getDay()];
   document.getElementById('dayNote').textContent=(nowDate.getDay()===0||nowDate.getDay()===6)?'周末模板':'工作日模板';
   document.getElementById('clockText').innerHTML=pad(nowDate.getHours())+':'+pad(nowDate.getMinutes())+'<em>'+pad(nowDate.getSeconds())+'</em>';
-  renderTracks(plan,actual,now);renderNow(actual,now);renderSummary(plan,actual,now);renderLog();
+  renderTracks(plan,actual,now);renderFocus(actual,now);renderSummary(plan,actual,now);renderLog();
 }
 function openDeviation(){
   const f=document.getElementById('deviationForm');f.classList.add('open');
   const now=currentMinute(),sch=currentSchedule(),seg=segmentAt(planSegments(sch),now);
   document.getElementById('fromTime').value=fmt(selected?selected.s:seg.s);
   document.getElementById('toTime').value=fmt(selected?selected.e:now);
-  document.getElementById('actualAct').value='';
+  document.getElementById('actualAct').value=selected?(selected.actual||selected.a):'';
   document.getElementById('devNote').value='';
 }
 function recordOverride(actual,fromMin,toMin,note){

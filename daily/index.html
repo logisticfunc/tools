@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="daily-routine-version" content="2026-06-13-gist-sync">
 <title>每日时间 · v6</title>
 <style>
   :root{
@@ -53,6 +54,7 @@
   }
   .seg.future{opacity:.32}
   .seg.deviated{box-shadow:inset 0 0 0 2px rgba(216,91,91,.55)}
+  .seg.selected{outline:2px solid var(--accent);outline-offset:-3px;z-index:8}
   .seg.onplan::after{content:"";position:absolute;left:5px;bottom:5px;width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.62)}
   .seg.tiny span{display:none}
   .nowline{
@@ -80,6 +82,12 @@
   .field{display:flex;flex-direction:column;gap:5px;min-width:120px}
   .field.grow{flex:1;min-width:180px}
   .field span{font-size:11px;color:var(--muted)}
+  .quickset{display:flex;gap:8px;flex-wrap:wrap;width:100%;padding-top:2px}
+  .chip{
+    border:1px solid rgba(255,255,255,.08);background:#15171c;color:var(--muted);
+    border-radius:999px;padding:6px 10px;cursor:pointer;font-size:12px;
+  }
+  .chip:hover{color:var(--text);border-color:#3d4655;background:#20232a}
   select,input{
     background:#101216;color:var(--text);border:1px solid var(--line);
     border-radius:7px;padding:8px 9px;outline:none;
@@ -100,8 +108,18 @@
   .x:hover{background:rgba(216,91,91,.14);color:#ff9d9d}
   .empty{color:var(--dim);font-style:italic;padding:10px 2px}
   .data-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .syncform{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+  .syncrow{display:grid;grid-template-columns:1fr;gap:8px}
+  .syncstatus{min-height:18px;color:var(--muted);font-size:12px}
+  .syncstatus.ok{color:#a8d8b1}
+  .syncstatus.bad{color:#ff9d9d}
   .detail{color:var(--muted);font-size:13px}
   .detail b{color:var(--text)}
+  .notice{
+    margin-top:12px;padding:10px 11px;border:1px solid rgba(233,168,58,.28);
+    background:rgba(233,168,58,.08);border-radius:7px;color:#d8c39a;font-size:12px;
+  }
+  .notice b{color:#ffd783}
   @media(max-width:920px){
     .app{padding:18px 14px 36px}
     .layout{grid-template-columns:1fr}
@@ -183,6 +201,11 @@
           </label>
           <button class="btn" id="cancelDeviation">取消</button>
           <button class="btn primary" id="saveDeviation">记录</button>
+          <div class="quickset" aria-label="快速记录">
+            <button class="chip" id="quickPhone" type="button">刷手机到现在</button>
+            <button class="chip" id="quickLateWake" type="button">延迟起床</button>
+            <button class="chip" id="quickEarlySleep" type="button">提前睡觉</button>
+          </div>
         </div>
       </section>
 
@@ -208,6 +231,38 @@
           <button class="btn danger" id="clearToday">清空今日</button>
           <input type="file" id="fileInput" accept=".json" hidden>
         </div>
+        <div class="notice"><b>发布版提示：</b>本地文件和 GitHub Pages 的记录互不相通。上线前后迁移数据请先导出，再在新页面导入。</div>
+      </div>
+      <div class="panel section">
+        <div class="rowhead">
+          <div class="label">Sync</div>
+          <div class="detail" id="syncMode">手动</div>
+        </div>
+        <div class="detail">公开页面只提供工具界面；同步数据会先在浏览器加密，再写入 GitHub Gist。Token 和同步密码只保存在当前浏览器。</div>
+        <div class="syncform">
+          <label class="field grow">
+            <span>GitHub Token</span>
+            <input type="password" id="syncToken" autocomplete="off" placeholder="需要 Gist 读写权限">
+          </label>
+          <label class="field grow">
+            <span>同步密码</span>
+            <input type="password" id="syncPassphrase" autocomplete="off" placeholder="每台设备填写同一个密码">
+          </label>
+          <label class="field grow">
+            <span>Gist ID</span>
+            <input type="text" id="syncGist" autocomplete="off" placeholder="留空则推送时新建私有 Gist">
+          </label>
+          <label class="field grow">
+            <span>文件名</span>
+            <input type="text" id="syncFile" autocomplete="off" value="daily-routine-data.json">
+          </label>
+          <div class="data-actions">
+            <button class="btn" id="saveSync">保存配置</button>
+            <button class="btn primary" id="pushSync">推送</button>
+            <button class="btn" id="pullSync">拉取</button>
+          </div>
+          <div class="syncstatus" id="syncStatus">未配置同步。</div>
+        </div>
       </div>
       <div class="panel section">
         <div class="label">Selected</div>
@@ -224,6 +279,7 @@ const DAYS=['周日','周一','周二','周三','周四','周五','周六'];
 const ACTS=['睡觉','进步','亲子','夫妻'];
 const COLOR={起床:'--wake',进步:'--grow',亲子:'--family',路上:'--commute',吃饭:'--eat',上班:'--work',刷手机:'--phone',夫妻:'--couple',睡觉:'--sleep'};
 const SHORT={起床:'起',进步:'进步',亲子:'亲子',路上:'路上',吃饭:'吃饭',上班:'上班',刷手机:'手机',夫妻:'夫妻',睡觉:'睡觉'};
+const SYNC_KEY='daily-routine-sync';
 let selected=null;
 
 function pad(n){return n<10?'0'+n:''+n}
@@ -233,10 +289,87 @@ function tm(t){return t[0]*60+t[1]}
 function parseTime(s){const p=s.split(':');return Number(p[0])*60+Number(p[1])}
 function fmt(min){min=((min%1440)+1440)%1440;return pad(Math.floor(min/60))+':'+pad(min%60)}
 function durText(m){m=Math.max(0,Math.round(m));const h=Math.floor(m/60),r=m%60;return h?(r?h+'h'+pad(r):h+'h'):r+'m'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function getLog(dk){try{const raw=localStorage.getItem('dr-log-'+dk);return raw?JSON.parse(raw):null}catch(e){return null}}
 function saveLog(log){localStorage.setItem('dr-log-'+log.date,JSON.stringify(log));updateIndex(log.date)}
 function updateIndex(dk){let idx=[];try{idx=JSON.parse(localStorage.getItem('dr-log-index')||'[]')}catch(e){};if(!idx.includes(dk))idx.push(dk);idx.sort().reverse();localStorage.setItem('dr-log-index',JSON.stringify(idx.slice(0,90)))}
 function addEntry(entry){const now=new Date(),dk=todayKey();const log=getLog(dk)||{date:dk,st:(now.getDay()===0||now.getDay()===6)?'we':'wd',entries:[]};log.entries.push(entry);saveLog(log)}
+function collectDrData(){const data={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('dr-'))data[k]=localStorage.getItem(k)}return data}
+function replaceDrData(data){const keys=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('dr-'))keys.push(k)}keys.forEach(k=>localStorage.removeItem(k));for(const k in data){if(k.startsWith('dr-'))localStorage.setItem(k,typeof data[k]==='string'?data[k]:JSON.stringify(data[k]))}}
+function loadSyncConfig(){try{return JSON.parse(localStorage.getItem(SYNC_KEY)||'{}')}catch(e){return {}}}
+function saveSyncConfig(cfg){localStorage.setItem(SYNC_KEY,JSON.stringify(cfg))}
+function setSyncStatus(msg,kind){const el=document.getElementById('syncStatus');el.textContent=msg;el.className='syncstatus '+(kind||'')}
+function syncPayload(){return {version:1,updatedAt:new Date().toISOString(),data:collectDrData()}}
+function readSyncForm(){return {
+  token:document.getElementById('syncToken').value.trim(),
+  passphrase:document.getElementById('syncPassphrase').value,
+  gistId:document.getElementById('syncGist').value.trim(),
+  fileName:document.getElementById('syncFile').value.trim()||'daily-routine-data.json'
+}}
+function fillSyncForm(){
+  const cfg=loadSyncConfig();
+  document.getElementById('syncToken').value=cfg.token||'';
+  document.getElementById('syncPassphrase').value=cfg.passphrase||'';
+  document.getElementById('syncGist').value=cfg.gistId||'';
+  document.getElementById('syncFile').value=cfg.fileName||'daily-routine-data.json';
+  setSyncStatus(cfg.gistId?'已配置 Gist '+cfg.gistId+'。':'未配置同步。',cfg.gistId?'ok':'');
+}
+function bytesToB64(bytes){let s='';bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s)}
+function b64ToBytes(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}
+async function deriveSyncKey(passphrase,salt){
+  if(!crypto.subtle)throw new Error('当前浏览器不支持 Web Crypto。');
+  const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(passphrase),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:200000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function encryptSyncPayload(payload,passphrase){
+  const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await deriveSyncKey(passphrase,salt);
+  const clear=new TextEncoder().encode(JSON.stringify(payload));
+  const cipher=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,clear));
+  return {version:2,encrypted:true,algorithm:'AES-GCM',kdf:'PBKDF2-SHA-256',iterations:200000,updatedAt:payload.updatedAt,salt:bytesToB64(salt),iv:bytesToB64(iv),ciphertext:bytesToB64(cipher)};
+}
+async function decryptSyncPayload(payload,passphrase){
+  if(payload&&payload.data)return payload;
+  if(!payload||!payload.encrypted)throw new Error('同步文件格式不正确。');
+  if(!passphrase)throw new Error('请输入同步密码。');
+  const salt=b64ToBytes(payload.salt),iv=b64ToBytes(payload.iv),cipher=b64ToBytes(payload.ciphertext);
+  const key=await deriveSyncKey(passphrase,salt);
+  const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,cipher);
+  return JSON.parse(new TextDecoder().decode(clear));
+}
+async function githubRequest(url,opts,cfg){
+  const res=await fetch(url,{...opts,headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json','Content-Type':'application/json','X-GitHub-Api-Version':'2022-11-28',...(opts&&opts.headers||{})}});
+  if(!res.ok){let msg=res.status+' '+res.statusText;try{const data=await res.json();if(data&&data.message)msg=data.message}catch(e){}throw new Error(msg)}
+  return res.json();
+}
+async function pushToGist(){
+  const cfg=readSyncForm();if(!cfg.token){setSyncStatus('请先填写 GitHub Token。','bad');return}
+  if(!cfg.passphrase){setSyncStatus('请先填写同步密码。云端只保存加密后的数据。','bad');return}
+  setSyncStatus('正在推送...', '');
+  try{
+    const body=JSON.stringify(await encryptSyncPayload(syncPayload(),cfg.passphrase),null,2);
+    if(!cfg.gistId){
+      const gist=await githubRequest('https://api.github.com/gists',{method:'POST',body:JSON.stringify({description:'DailyRoutine data',public:false,files:{[cfg.fileName]:{content:body}}})},cfg);
+      cfg.gistId=gist.id;document.getElementById('syncGist').value=cfg.gistId;saveSyncConfig(cfg);
+      setSyncStatus('已新建加密 Gist 并推送：'+cfg.gistId,'ok');
+    }else{
+      await githubRequest('https://api.github.com/gists/'+encodeURIComponent(cfg.gistId),{method:'PATCH',body:JSON.stringify({files:{[cfg.fileName]:{content:body}}})},cfg);
+      saveSyncConfig(cfg);setSyncStatus('已加密推送 '+Object.keys(collectDrData()).length+' 个数据键。','ok');
+    }
+  }catch(e){setSyncStatus('推送失败：'+e.message,'bad')}
+}
+async function pullFromGist(){
+  const cfg=readSyncForm();if(!cfg.token||!cfg.gistId){setSyncStatus('请先填写 GitHub Token 和 Gist ID。','bad');return}
+  if(!confirm('从云端拉取会替换本地所有 dr-* 记录。继续？'))return;
+  setSyncStatus('正在拉取...', '');
+  try{
+    const gist=await githubRequest('https://api.github.com/gists/'+encodeURIComponent(cfg.gistId),{method:'GET'},cfg);
+    const file=gist.files&&gist.files[cfg.fileName];if(!file||!file.content)throw new Error('Gist 中没有文件 '+cfg.fileName);
+    const payload=await decryptSyncPayload(JSON.parse(file.content),cfg.passphrase),data=payload.data||payload;
+    replaceDrData(data);saveSyncConfig(cfg);selected=null;update();
+    setSyncStatus('已拉取 '+Object.keys(data).filter(k=>k.startsWith('dr-')).length+' 个数据键。','ok');
+  }catch(e){setSyncStatus('拉取失败：'+e.message,'bad')}
+}
 
 function splitBlock(b){
   const s=tm(b.s),e0=tm(b.e),name=b.l||b.a;
@@ -309,13 +442,14 @@ function colorFor(a){return 'var('+COLOR[a]+')'}
 function renderSeg(seg,now,kind){
   const left=seg.s/1440*100,width=(seg.e-seg.s)/1440*100;
   const div=document.createElement('button');
-  div.className='seg '+(width<3.8?'tiny ':'')+(kind==='actual'?(seg.deviated?'deviated ':'onplan '):'')+(seg.s>=now?'future ':'');
+  const isSelected=selected&&selected.s===seg.s&&selected.e===seg.e&&(selected.actual||selected.a)===(seg.actual||seg.a);
+  div.className='seg '+(width<3.8?'tiny ':'')+(kind==='actual'?(seg.deviated?'deviated ':'onplan '):'')+(seg.s>=now?'future ':'')+(isSelected?'selected ':'');
   div.style.left=left+'%';div.style.width=width+'%';div.style.background=colorFor(seg.actual||seg.a);
   div.style.border=0;div.style.cursor=kind==='actual'?'pointer':'default';
-  div.innerHTML='<span>'+(SHORT[seg.actual||seg.a]||seg.actual||seg.a)+'</span>';
+  div.innerHTML='<span>'+esc(SHORT[seg.actual||seg.a]||seg.actual||seg.a)+'</span>';
   div.title=(seg.actual||seg.a)+' '+fmt(seg.s)+'-'+fmt(seg.e);
   if(kind==='actual'){
-    div.addEventListener('click',()=>{selected=seg;renderSelected(seg)});
+    div.addEventListener('click',()=>{selected=seg;renderSelected(seg);update()});
   }
   return div;
 }
@@ -373,7 +507,7 @@ function renderLog(){
   if(!entries.length){list.innerHTML='<div class="empty">今天还没有记录。</div>';return}
   entries.map((e,i)=>({e,i})).sort((a,b)=>(a.e.time||'99:99').localeCompare(b.e.time||'99:99')).forEach(({e,i})=>{
     const item=document.createElement('div');item.className='logitem';
-    item.innerHTML='<div class="logtime">'+(e.time||'--')+'</div><div class="logdesc">'+describeEntry(e)+'</div><button class="x" title="撤销">×</button>';
+    item.innerHTML='<div class="logtime">'+esc(e.time||'--')+'</div><div class="logdesc">'+esc(describeEntry(e))+'</div><button class="x" title="撤销">×</button>';
     item.querySelector('.x').addEventListener('click',()=>{
       const log=getLog(todayKey());if(!log)return;log.entries.splice(i,1);saveLog(log);update();
     });
@@ -382,8 +516,8 @@ function renderLog(){
 }
 function renderSelected(seg){
   const detail=document.getElementById('selectedDetail');
-  detail.innerHTML='<p><b>'+(seg.actual||seg.a)+'</b> · '+fmt(seg.s)+'-'+fmt(seg.e)+' · '+durText(seg.e-seg.s)+'</p>'+
-    (seg.deviated?'<p>原计划：<b>'+seg.planned+'</b>'+(seg.note?' · '+seg.note:'')+'</p>':'<p>按计划执行。</p>');
+  detail.innerHTML='<p><b>'+esc(seg.actual||seg.a)+'</b> · '+fmt(seg.s)+'-'+fmt(seg.e)+' · '+durText(seg.e-seg.s)+'</p>'+
+    (seg.deviated?'<p>原计划：<b>'+esc(seg.planned)+'</b>'+(seg.note?' · '+esc(seg.note):'')+'</p>':'<p>按计划执行。</p>');
   document.getElementById('fromTime').value=fmt(seg.s);
   document.getElementById('toTime').value=fmt(seg.e);
 }
@@ -403,21 +537,39 @@ function openDeviation(){
   document.getElementById('actualAct').value='';
   document.getElementById('devNote').value='';
 }
+function recordOverride(actual,fromMin,toMin,note){
+  const from=fmt(fromMin),to=fmt(toMin),plan=segmentAt(planSegments(currentSchedule()),fromMin);
+  addEntry({type:'override',time:from,endTime:to,actual,scheduled:plan?plan.a:'',note:note||undefined});
+  document.getElementById('deviationForm').classList.remove('open');selected=null;update();
+}
+function currentPlanSegment(){return segmentAt(planSegments(currentSchedule()),currentMinute())}
 document.getElementById('openDeviation').addEventListener('click',openDeviation);
 document.getElementById('cancelDeviation').addEventListener('click',()=>document.getElementById('deviationForm').classList.remove('open'));
 document.getElementById('saveDeviation').addEventListener('click',()=>{
   const act=document.getElementById('actualAct').value;if(!act)return;
   const from=document.getElementById('fromTime').value,to=document.getElementById('toTime').value;if(!from||!to)return;
-  const s=parseTime(from),plan=segmentAt(planSegments(currentSchedule()),s);
-  addEntry({type:'override',time:from,endTime:to,actual:act,scheduled:plan?plan.a:'',note:document.getElementById('devNote').value.trim()||undefined});
-  document.getElementById('deviationForm').classList.remove('open');selected=null;update();
+  recordOverride(act,parseTime(from),parseTime(to),document.getElementById('devNote').value.trim());
+});
+document.getElementById('quickPhone').addEventListener('click',()=>{
+  const now=currentMinute(),seg=selected||currentPlanSegment();
+  const start=seg&&seg.s<now?seg.s:Math.max(0,now-15);
+  recordOverride('刷手机',start,now,'快速记录');
+});
+document.getElementById('quickLateWake').addEventListener('click',()=>{
+  const now=currentMinute();
+  if(now<=450){alert('现在还早于计划起床时间。');return}
+  recordOverride('睡觉',450,now,'延迟起床');
+});
+document.getElementById('quickEarlySleep').addEventListener('click',()=>{
+  const now=currentMinute();
+  recordOverride('睡觉',now,1440,'提前睡觉');
 });
 document.getElementById('logWake').addEventListener('click',()=>{const d=new Date();addEntry({type:'wake_up',time:pad(d.getHours())+':'+pad(d.getMinutes())});update()});
 document.getElementById('logSleep').addEventListener('click',()=>{const d=new Date();addEntry({type:'sleep_start',time:pad(d.getHours())+':'+pad(d.getMinutes())});update()});
 document.getElementById('addNote').addEventListener('click',()=>{const note=prompt('备注');if(!note||!note.trim())return;const d=new Date();addEntry({type:'note',time:pad(d.getHours())+':'+pad(d.getMinutes()),note:note.trim()});update()});
 document.getElementById('clearToday').addEventListener('click',()=>{if(confirm('清空今日记录？')){localStorage.removeItem('dr-log-'+todayKey());selected=null;update()}});
 document.getElementById('exportData').addEventListener('click',()=>{
-  const data={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('dr-'))data[k]=localStorage.getItem(k)}
+  const data=collectDrData();
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download='daily-routine-'+todayKey()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 });
 document.getElementById('importData').addEventListener('click',()=>document.getElementById('fileInput').click());
@@ -426,7 +578,10 @@ document.getElementById('fileInput').addEventListener('change',e=>{
   r.onload=ev=>{try{const data=JSON.parse(ev.target.result);for(const k in data){if(k.startsWith('dr-'))localStorage.setItem(k,data[k])}update()}catch(err){alert('导入失败：'+err.message)}};
   r.readAsText(f);e.target.value='';
 });
-renderRuler();renderLegend();update();setInterval(update,1000);
+document.getElementById('saveSync').addEventListener('click',()=>{const cfg=readSyncForm();saveSyncConfig(cfg);setSyncStatus(cfg.gistId?'已保存同步配置。':'已保存配置。推送时会新建私有 Gist。','ok')});
+document.getElementById('pushSync').addEventListener('click',pushToGist);
+document.getElementById('pullSync').addEventListener('click',pullFromGist);
+renderRuler();renderLegend();fillSyncForm();update();setInterval(update,1000);
 </script>
 </body>
 </html>
